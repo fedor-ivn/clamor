@@ -408,6 +408,10 @@ pub fn encode_key(key: KeyEvent) -> Option<Vec<u8>> {
         return Some(vec![0x15]);
     }
 
+    if key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::Enter {
+        return Some(vec![0x0a]);
+    }
+
     if key.modifiers.contains(KeyModifiers::ALT) {
         match key.code {
             KeyCode::Backspace => return Some(vec![0x1b, 0x7f]),
@@ -597,6 +601,33 @@ pub fn copy_to_clipboard(text: &str) {
             let _ = stdin.write_all(text.as_bytes());
         }
         let _ = child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }
+    }
+
+    #[test]
+    fn shift_enter_encodes_as_lf() {
+        let event = key(KeyCode::Enter, KeyModifiers::SHIFT);
+        assert_eq!(encode_key(event), Some(vec![0x0a]));
+    }
+
+    #[test]
+    fn plain_enter_encodes_as_cr() {
+        let event = key(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(encode_key(event), Some(vec![0x0d]));
     }
 }
 

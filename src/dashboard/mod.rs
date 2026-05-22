@@ -2039,29 +2039,6 @@ async fn handle_terminal_event(
                 return Ok(LoopAction::Continue);
             }
 
-            // Ctrl+R -> refresh terminal (rebuild daemon parser from ring buffer)
-            if key_event.modifiers.contains(KeyModifiers::CONTROL)
-                && key_event.code == KeyCode::Char('r')
-            {
-                if let Ok(result) = client.refresh_parser_buffered(agent_id).await {
-                    let pv = if result.catch_up.is_empty() {
-                        PaneView::new(content_rows, term_cols)
-                    } else {
-                        PaneView::from_catch_up(content_rows, term_cols, &result.catch_up)
-                    };
-                    pane_views.insert(agent_id.to_string(), pv);
-                    for msg in result.buffered {
-                        if let DaemonMessage::Output { ref id, ref data } = msg {
-                            if let Some(pv) = pane_views.get_mut(id.as_str()) {
-                                pv.process_output(data);
-                            }
-                        }
-                    }
-                    terminal.clear()?;
-                }
-                return Ok(LoopAction::Continue);
-            }
-
             if let Some(pv) = pane_views.get_mut(agent_id) {
                 pv.clear_selection();
                 pv.snap_to_bottom();

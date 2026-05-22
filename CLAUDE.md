@@ -79,7 +79,6 @@ Current protocol messages include `Hello { version }` for version exchange betwe
 - `Ctrl+C` — send SIGINT to agent
 - `Ctrl+J` — snap to bottom (live view)
 - `Ctrl+G` / `Ctrl+Shift+G` — jump to next/prev agent in `Input` state (stays put with a flash if none)
-- `Ctrl+R` — refresh terminal (rebuild daemon parser from ring buffer)
 - `Ctrl+S` — enter copy mode
 - Scroll up — freeze display (output buffered, shown on return to live)
 
