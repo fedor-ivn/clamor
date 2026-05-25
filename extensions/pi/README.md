@@ -22,6 +22,8 @@ Or add to `~/.pi/agent/settings.json`:
 
 ## How it works
 
-On `session_start`, the extension reads `CLAMOR_AGENT_ID` from the environment (set by clamor when spawning agents) and pipes the session ID to `clamor hook`. The hook stores it as `resume_token` in clamor state.
+**Session tracking:** On `session_start`, the extension reads `CLAMOR_AGENT_ID` from the environment and pipes the session ID to `clamor hook`. The hook stores it as `resume_token` in clamor state so reload/resume targets the exact session.
+
+**State tracking:** On `before_agent_start` (model is processing), the extension calls `clamor set-state working`. On `turn_end` (model finished, awaiting input), it calls `clamor set-state input`. This keeps the clamor dashboard accurate — agents show Working while the model runs and Input when they need attention.
 
 Silently no-ops when not running under clamor or when clamor isn't installed.
