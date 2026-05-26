@@ -36,7 +36,10 @@ function setState(state: "working" | "input", sessionToken?: string): void {
 }
 
 export default function (pi: any) {
-  pi.on("session_start", async (_event: any, ctx: any) => {
+  pi.on("session_start", async (event: any, ctx: any) => {
+    // Only set Working for brand-new sessions; resume/reload/fork leave clamor
+    // state as-is (it's already persisted from the original run).
+    if (event.reason !== "new") return;
     const sessionId = ctx.sessionManager.getSessionId();
     if (!sessionId) return;
     setState("working", sessionId);
@@ -46,7 +49,10 @@ export default function (pi: any) {
     setState("working");
   });
 
-  pi.on("turn_end", async () => {
+  // agent_end wraps the full agent loop for one user prompt; turn_end would
+  // fire after every individual LLM response cycle, including mid-tool-use
+  // turns, causing false Input state while the agent is still executing.
+  pi.on("agent_end", async () => {
     setState("input");
   });
 }
