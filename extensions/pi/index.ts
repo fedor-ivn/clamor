@@ -3,9 +3,11 @@ import { spawn } from "node:child_process";
 /**
  * Pi extension that integrates with clamor for session tracking and state.
  *
- * - session_start: reports session ID to clamor via `clamor hook` so
- *   reload/resume targets the exact session.
- * - before_agent_start: sets state to Working while the model is processing.
+ * - session_start: sets state to Working via `clamor set-state working`,
+ *   passing the session ID as `--session-token` so clamor can persist it as
+ *   resume_token for token-based session resume.
+ * - before_agent_start: sets state to Working (fallback if session_start
+ *   didn't fire).
  * - turn_end: sets state to Input when the model finishes and awaits input.
  *
  * Requires CLAMOR_AGENT_ID in the environment (set automatically by clamor
@@ -16,11 +18,15 @@ import { spawn } from "node:child_process";
  * Or symlink into ~/.pi/agent/extensions/clamor-session/
  */
 
-function setState(state: "working" | "input"): void {
+function setState(state: "working" | "input", sessionToken?: string): void {
   const agentId = process.env.CLAMOR_AGENT_ID;
   if (!agentId) return;
   try {
-    spawn("clamor", ["set-state", state, "--agent", agentId], {
+    const args = ["set-state", state, "--agent", agentId];
+    if (sessionToken) {
+      args.push("--session-token", sessionToken);
+    }
+    spawn("clamor", args, {
       stdio: "ignore",
       env: process.env,
     });
@@ -31,27 +37,9 @@ function setState(state: "working" | "input"): void {
 
 export default function (pi: any) {
   pi.on("session_start", async (_event: any, ctx: any) => {
-    if (!process.env.CLAMOR_AGENT_ID) return;
-
     const sessionId = ctx.sessionManager.getSessionId();
     if (!sessionId) return;
-
-    const payload = JSON.stringify({
-      hook_event_name: "SessionStart",
-      session_id: sessionId,
-    });
-
-    try {
-      const child = spawn("clamor", ["hook"], {
-        stdio: ["pipe", "ignore", "ignore"],
-        env: process.env,
-      });
-      child.stdin.write(payload);
-      child.stdin.end();
-      // Don't wait — fire and forget so we don't block pi
-    } catch {
-      // clamor not installed or not in PATH — silently ignore
-    }
+    setState("working", sessionId);
   });
 
   pi.on("before_agent_start", async () => {
