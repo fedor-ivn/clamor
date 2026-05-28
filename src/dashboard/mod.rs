@@ -2065,123 +2065,18 @@ async fn handle_terminal_event(
                 .get(agent_id)
                 .is_some_and(|pv| pv.mouse_mode_active());
 
-            if mouse_mode {
-                if let Some(bytes) = pane::encode_mouse_for_pane(*mouse_event, pane_area) {
-                    let _ = client.send_input(agent_id, &bytes).await;
-                }
-            } else {
-                use crossterm::event::{MouseButton, MouseEventKind};
-                match mouse_event.kind {
-                    MouseEventKind::ScrollUp => {
-                        if let Some(pv) = pane_views.get_mut(agent_id) {
-                            if pv.alternate_screen() {
-                                let _ = client.send_input(agent_id, b"\x1b[A\x1b[A\x1b[A").await;
-                            } else {
-                                pv.scroll_up(3);
-                            }
-                        }
-                    }
-                    MouseEventKind::ScrollDown => {
-                        if let Some(pv) = pane_views.get_mut(agent_id) {
-                            if pv.alternate_screen() {
-                                let _ = client.send_input(agent_id, b"\x1b[B\x1b[B\x1b[B").await;
-                            } else {
-                                pv.scroll_down(3);
-                            }
-                        }
-                    }
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        if let Some(pv) = pane_views.get_mut(agent_id) {
-                            if let Some(ref sel) = pv.selection {
-                                if !sel.active && sel.start != sel.end {
-                                    let sel = sel.clone();
-                                    let screen = pv.scrolled_screen();
-                                    let text =
-                                        pane::extract_selected_text(screen, &sel, pane_area.width);
-                                    if !text.is_empty() {
-                                        pane::copy_to_clipboard(&text);
-                                    }
-                                }
-                            }
+            use crossterm::event::{MouseButton, MouseEventKind};
 
-                            let col = mouse_event.column.saturating_sub(pane_area.x);
-                            let row = mouse_event.row.saturating_sub(pane_area.y);
-                            if col < pane_area.width && row < pane_area.height {
-                                pv.selection = Some(pane::Selection {
-                                    start: (col, row),
-                                    end: (col, row),
-                                    active: true,
-                                });
-                            }
-                        }
-                    }
-                    MouseEventKind::Drag(MouseButton::Left) => {
-                        if let Some(pv) = pane_views.get_mut(agent_id) {
-                            if pv.selection.as_ref().is_some_and(|s| s.active) {
-                                let col = mouse_event
-                                    .column
-                                    .saturating_sub(pane_area.x)
-                                    .min(pane_area.width.saturating_sub(1));
-                                let row = mouse_event
-                                    .row
-                                    .saturating_sub(pane_area.y)
-                                    .min(pane_area.height.saturating_sub(1));
-
-                                if let Some(ref mut sel) = pv.selection {
-                                    sel.end = (col, row);
-                                }
-
-                                if !pv.alternate_screen() {
-                                    let scroll_zone = 3u16;
-                                    if mouse_event.row < pane_area.y.saturating_add(scroll_zone) {
-                                        let distance = pane_area
-                                            .y
-                                            .saturating_add(scroll_zone)
-                                            .saturating_sub(mouse_event.row);
-                                        let speed = (distance as usize).clamp(1, 5);
-                                        let old = pv.scroll_offset;
-                                        pv.scroll_up(speed);
-                                        let delta = (pv.scroll_offset - old) as u16;
-                                        if delta > 0 {
-                                            if let Some(ref mut sel) = pv.selection {
-                                                sel.start.1 = sel
-                                                    .start
-                                                    .1
-                                                    .saturating_add(delta)
-                                                    .min(pane_area.height.saturating_sub(1));
-                                            }
-                                        }
-                                    } else if mouse_event.row
-                                        >= pane_area.y.saturating_add(
-                                            pane_area.height.saturating_sub(scroll_zone),
-                                        )
-                                    {
-                                        let edge_start = pane_area.y.saturating_add(
-                                            pane_area.height.saturating_sub(scroll_zone),
-                                        );
-                                        let distance = mouse_event.row.saturating_sub(edge_start);
-                                        let speed = (distance as usize + 1).clamp(1, 5);
-                                        let old = pv.scroll_offset;
-                                        pv.scroll_down(speed);
-                                        let delta = (old - pv.scroll_offset) as u16;
-                                        if delta > 0 {
-                                            if let Some(ref mut sel) = pv.selection {
-                                                sel.start.1 = sel.start.1.saturating_sub(delta);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    MouseEventKind::Up(MouseButton::Left) => {
-                        if let Some(pv) = pane_views.get_mut(agent_id) {
-                            let should_copy = pv
-                                .selection
-                                .as_ref()
-                                .is_some_and(|s| s.active && s.start != s.end);
-                            if should_copy {
-                                let sel = pv.selection.clone().unwrap();
+            // Left-button drag always belongs to clamor for text selection,
+            // even when the PTY app has mouse mode enabled. Clicks are relayed.
+            match mouse_event.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(pv) = pane_views.get_mut(agent_id) {
+                        // Clicking on an existing selection copies it before
+                        // starting a new one (stale-selection click-to-copy).
+                        if let Some(ref sel) = pv.selection {
+                            if !sel.active && sel.start != sel.end {
+                                let sel = sel.clone();
                                 let screen = pv.scrolled_screen();
                                 let text =
                                     pane::extract_selected_text(screen, &sel, pane_area.width);
@@ -2189,11 +2084,168 @@ async fn handle_terminal_event(
                                     pane::copy_to_clipboard(&text);
                                 }
                             }
-                            pv.selection = None;
+                        }
+
+                        let col = mouse_event.column.saturating_sub(pane_area.x);
+                        let row = mouse_event.row.saturating_sub(pane_area.y);
+                        if col < pane_area.width && row < pane_area.height {
+                            pv.selection = Some(pane::Selection {
+                                start: (col, row),
+                                end: (col, row),
+                                active: true,
+                            });
                         }
                     }
-                    _ => {}
                 }
+
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    if let Some(pv) = pane_views.get_mut(agent_id) {
+                        if pv.selection.as_ref().is_some_and(|s| s.active) {
+                            let col = mouse_event
+                                .column
+                                .saturating_sub(pane_area.x)
+                                .min(pane_area.width.saturating_sub(1));
+                            let row = mouse_event
+                                .row
+                                .saturating_sub(pane_area.y)
+                                .min(pane_area.height.saturating_sub(1));
+
+                            if let Some(ref mut sel) = pv.selection {
+                                sel.end = (col, row);
+                            }
+
+                            if !pv.alternate_screen() {
+                                let scroll_zone = 3u16;
+                                if mouse_event.row < pane_area.y.saturating_add(scroll_zone) {
+                                    let distance = pane_area
+                                        .y
+                                        .saturating_add(scroll_zone)
+                                        .saturating_sub(mouse_event.row);
+                                    let speed = (distance as usize).clamp(1, 5);
+                                    let old = pv.scroll_offset;
+                                    pv.scroll_up(speed);
+                                    let delta = (pv.scroll_offset - old) as u16;
+                                    if delta > 0 {
+                                        if let Some(ref mut sel) = pv.selection {
+                                            sel.start.1 = sel
+                                                .start
+                                                .1
+                                                .saturating_add(delta)
+                                                .min(pane_area.height.saturating_sub(1));
+                                        }
+                                    }
+                                } else if mouse_event.row
+                                    >= pane_area
+                                        .y
+                                        .saturating_add(pane_area.height.saturating_sub(scroll_zone))
+                                {
+                                    let edge_start = pane_area.y.saturating_add(
+                                        pane_area.height.saturating_sub(scroll_zone),
+                                    );
+                                    let distance = mouse_event.row.saturating_sub(edge_start);
+                                    let speed = (distance as usize + 1).clamp(1, 5);
+                                    let old = pv.scroll_offset;
+                                    pv.scroll_down(speed);
+                                    let delta = (old - pv.scroll_offset) as u16;
+                                    if delta > 0 {
+                                        if let Some(ref mut sel) = pv.selection {
+                                            sel.start.1 = sel.start.1.saturating_sub(delta);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                MouseEventKind::Up(MouseButton::Left) => {
+                    if let Some(pv) = pane_views.get_mut(agent_id) {
+                        let was_drag = pv
+                            .selection
+                            .as_ref()
+                            .is_some_and(|s| s.active && s.start != s.end);
+
+                        if was_drag {
+                            // Drag = clamor selection. Copy and clear.
+                            let sel = pv.selection.clone().unwrap();
+                            let screen = pv.scrolled_screen();
+                            let text =
+                                pane::extract_selected_text(screen, &sel, pane_area.width);
+                            if !text.is_empty() {
+                                pane::copy_to_clipboard(&text);
+                            }
+                            pv.selection = None;
+                        } else {
+                            // Click (no drag). Relay to PTY if mouse mode is active.
+                            pv.selection = None;
+                            if mouse_mode {
+                                // Synthesize the click: Down then Up, since we ate
+                                // the original Down to distinguish drag vs click.
+                                let down = pane::encode_mouse_for_pane(
+                                    crossterm::event::MouseEvent {
+                                        kind: MouseEventKind::Down(MouseButton::Left),
+                                        ..*mouse_event
+                                    },
+                                    pane_area,
+                                );
+                                let up = pane::encode_mouse_for_pane(
+                                    crossterm::event::MouseEvent {
+                                        kind: MouseEventKind::Up(MouseButton::Left),
+                                        ..*mouse_event
+                                    },
+                                    pane_area,
+                                );
+                                if let Some(down) = down {
+                                    let _ = client.send_input(agent_id, &down).await;
+                                }
+                                if let Some(up) = up {
+                                    let _ = client.send_input(agent_id, &up).await;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Scroll and non-left-button events:
+                // relay when mouse mode active, handle locally otherwise.
+                MouseEventKind::ScrollUp if mouse_mode => {
+                    if let Some(bytes) = pane::encode_mouse_for_pane(*mouse_event, pane_area) {
+                        let _ = client.send_input(agent_id, &bytes).await;
+                    }
+                }
+                MouseEventKind::ScrollDown if mouse_mode => {
+                    if let Some(bytes) = pane::encode_mouse_for_pane(*mouse_event, pane_area) {
+                        let _ = client.send_input(agent_id, &bytes).await;
+                    }
+                }
+                MouseEventKind::Down(_) | MouseEventKind::Up(_) | MouseEventKind::Drag(_)
+                    if mouse_mode =>
+                {
+                    if let Some(bytes) = pane::encode_mouse_for_pane(*mouse_event, pane_area) {
+                        let _ = client.send_input(agent_id, &bytes).await;
+                    }
+                }
+
+                // Local-only scroll (PTY app does not own mouse).
+                MouseEventKind::ScrollUp => {
+                    if let Some(pv) = pane_views.get_mut(agent_id) {
+                        if pv.alternate_screen() {
+                            let _ = client.send_input(agent_id, b"\x1b[A\x1b[A\x1b[A").await;
+                        } else {
+                            pv.scroll_up(3);
+                        }
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    if let Some(pv) = pane_views.get_mut(agent_id) {
+                        if pv.alternate_screen() {
+                            let _ = client.send_input(agent_id, b"\x1b[B\x1b[B\x1b[B").await;
+                        } else {
+                            pv.scroll_down(3);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
