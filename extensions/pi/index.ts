@@ -6,8 +6,9 @@ import { spawn } from "node:child_process";
  * - session_start: sets state to Working via `clamor set-state working`,
  *   passing the session ID as `--session-token` so clamor can persist it as
  *   resume_token for token-based session resume.
- * - before_agent_start: sets state to Working (fallback if session_start
- *   didn't fire).
+ * - before_agent_start: sets state to Working and re-records the session
+ *   token on every turn, so agents that missed session_start get their token
+ *   on the next user prompt.
  * - turn_end: sets state to Input when the model finishes and awaits input.
  *
  * Requires CLAMOR_AGENT_ID in the environment (set automatically by clamor
@@ -45,8 +46,9 @@ export default function (pi: any) {
     setState("working", sessionId);
   });
 
-  pi.on("before_agent_start", async () => {
-    setState("working");
+  pi.on("before_agent_start", async (_event: any, ctx: any) => {
+    const sessionId = ctx?.sessionManager?.getSessionId() ?? undefined;
+    setState("working", sessionId);
   });
 
   // agent_end wraps the full agent loop for one user prompt; turn_end would

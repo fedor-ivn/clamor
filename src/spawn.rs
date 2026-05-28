@@ -276,6 +276,13 @@ pub fn resolve_resume_launch(
         .as_ref()
         .with_context(|| format!("Backend '{backend_id}' is missing a resume command"))?;
     let token = resume_token.filter(|t| !t.is_empty());
+    let needs_token = resume
+        .cmd
+        .iter()
+        .any(|arg| arg.contains("{{resume_token}}") || arg.contains("{{session_id}}"));
+    if needs_token && token.is_none() {
+        bail!("Backend '{backend_id}' resume requires a session token but none is stored for this agent");
+    }
     let ctx = TemplateContext {
         prompt: None,
         title: Some(title),
@@ -574,7 +581,11 @@ pub async fn resume_agents() -> anyhow::Result<()> {
     let resumable: Vec<&Agent> = state
         .agents
         .values()
-        .filter(|a| a.resume_token.is_some() || backend_supports_resume(&config, &a.backend_id))
+        .filter(|a| {
+            backend_supports_resume(&config, &a.backend_id)
+                && (a.resume_token.is_some()
+                    || backend_supports_tokenless_resume(&config, &a.backend_id))
+        })
         .collect();
 
     if resumable.is_empty() {
